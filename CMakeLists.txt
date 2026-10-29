@@ -16,7 +16,7 @@ include_directories(${MISSION_SOURCE_DIR}/apps/sch/fsw/platform_inc)
 include_directories(${MISSION_SOURCE_DIR}/apps/hs/fsw/platform_inc)
 include_directories(${MISSION_SOURCE_DIR}/apps/hk/fsw/platform_inc)
 include_directories(${APPLICATION_PLATFORM_INC_LIST})
-
+include_directories(${MISSION_SOURCE_DIR}/apps/hwlib/fsw/public_inc)
 include_directories(${MISSION_SOURCE_DIR}/../components/cryptolib/include)
 
 include_directories(fsw/examples/${TO_TRANSPORT})

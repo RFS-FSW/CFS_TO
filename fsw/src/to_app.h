@@ -209,6 +209,7 @@ typedef struct
        TO_CustomProcessData called when output is enabled and active. */
     uint16         usOutputEnabled;  /**< Output enabled(by enable/disable)   */
     uint16         usOutputActive;   /**< Output active (by pause/resume)     */
+    bool ContactAvailable;
                                              
 } TO_AppData_t;
 

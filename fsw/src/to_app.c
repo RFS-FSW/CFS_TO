@@ -60,6 +60,8 @@
 #include <string.h>
 #include "cfe.h"
 #include "to_app.h"
+#include "passmgr_msg.h"
+#include "passmgr_msgids.h"
 
 /*
 ** Local Defines
@@ -124,6 +126,7 @@ int32 TO_AppInit(void)
     g_TO_AppData.usOutputEnabled = 0;
     g_TO_AppData.usOutputActive = 0;
     g_TO_AppData.uiRunStatus = CFE_ES_RunStatus_APP_RUN;
+    g_TO_AppData.ContactAvailable = false;
 
     /* Init Events */
     if (TO_InitEvent() != CFE_SUCCESS)
@@ -390,6 +393,20 @@ int32 TO_InitPipe(void)
     if (iStatus == CFE_SUCCESS)
     {
         CFE_SB_Subscribe(CFE_SB_ValueToMsgId(TO_WAKEUP_MID), g_TO_AppData.SchPipeId);
+        iStatus = CFE_SB_Subscribe(
+            CFE_SB_ValueToMsgId(PASSMGR_HK_TLM_MID),
+            g_TO_AppData.SchPipeId);
+
+        if (iStatus != CFE_SUCCESS)
+        {
+            CFE_EVS_SendEvent(
+                TO_INIT_ERR_EID,
+                CFE_EVS_EventType_ERROR,
+                "Failed to subscribe PASSMGR HK (0x%08x)",
+                (unsigned int)iStatus);
+
+            goto TO_InitPipe_Exit_Tag;
+        }
     }
     else
     {
@@ -592,6 +609,33 @@ int32 TO_RcvMsg(int32 iBlocking)
                 TO_ProcessTlmPipes();
                 TO_SendOutData();
                 break;
+            
+            case PASSMGR_HK_TLM_MID:
+            {
+                CFE_MSG_Size_t MsgSize = 0;
+
+                if (CFE_MSG_GetSize(g_TO_AppData.SchMsgPtr, &MsgSize)
+                        == CFE_SUCCESS &&
+                    MsgSize == sizeof(PASSMGR_Hk_tlm_t))
+                {
+                    const PASSMGR_Hk_tlm_t *PassHk =
+                        (const PASSMGR_Hk_tlm_t *)g_TO_AppData.SchMsgPtr;
+
+                    g_TO_AppData.ContactAvailable =
+                        (PassHk->ContactAvailable == 1);
+                }
+                else
+                {
+                    g_TO_AppData.ContactAvailable = false;
+
+                    CFE_EVS_SendEvent(
+                        TO_MSGID_ERR_EID,
+                        CFE_EVS_EventType_ERROR,
+                        "Invalid PASSMGR HK length");
+                }
+
+                break;
+            }
 
             default:
                 CFE_EVS_SendEvent(TO_MSGID_ERR_EID, CFE_EVS_EventType_ERROR,
@@ -677,7 +721,8 @@ void TO_ProcessNewData(TO_TlmPipe_t *pTlmPipe, uint16 usRouteId)
 #ifdef TO_FRAMING_ENABLED
     /* Prepare framing mechanism, if applicable. */
     if (g_TO_AppData.usOutputEnabled && g_TO_AppData.usOutputActive &&
-        g_TO_AppData.routes[usRouteId].usIsEnabled)
+        g_TO_AppData.routes[usRouteId].usIsEnabled &&
+    g_TO_AppData.ContactAvailable)
     {
 #ifdef DEBUG
     OS_printf("Preparing framing mechanism...\n");
@@ -705,7 +750,8 @@ void TO_ProcessNewData(TO_TlmPipe_t *pTlmPipe, uint16 usRouteId)
             CFE_SUCCESS)
         {
             /* Process if output is enabled and active. Otherwise, drop. */
-            if (g_TO_AppData.usOutputEnabled && g_TO_AppData.usOutputActive)
+            if (g_TO_AppData.usOutputEnabled && g_TO_AppData.usOutputActive
+            && g_TO_AppData.ContactAvailable)
             {
                 CFE_MSG_GetMsgId(pTlmMsg, &usMsgId);
                 iTblIdx = TO_FindTableIndex(g_TO_AppData.pConfigTable, usMsgId);
@@ -731,6 +777,13 @@ void TO_ProcessNewData(TO_TlmPipe_t *pTlmPipe, uint16 usRouteId)
                         iStatus = TO_CustomProcessData(pTlmMsg, size, iTblIdx, usRouteId);
                         if (iStatus < 0)
                         {
+                            CFE_EVS_SendEvent(
+                                TO_DATA_PROCESS_ERR_EID,
+                                CFE_EVS_EventType_ERROR,
+                                "Data processing failed: route=%u MID=0x%04X status=%ld",
+                                (unsigned int)usRouteId,
+                                (unsigned int)CFE_SB_MsgIdToValue(usMsgId),
+                                (long)iStatus);
                             break;
                         }
                         else
@@ -766,7 +819,8 @@ end_of_function:
     /* NOTE: The CustomProcessData may have failed. Custom function responsible
        for dealing with status as provided. */
     if (g_TO_AppData.usOutputEnabled && g_TO_AppData.usOutputActive &&
-        g_TO_AppData.routes[usRouteId].usIsEnabled)
+        g_TO_AppData.routes[usRouteId].usIsEnabled
+    && g_TO_AppData.ContactAvailable)
     {
         TO_CustomFrameSend(usRouteId, iStatus);
     }
